@@ -268,9 +268,6 @@ const startTurnTimer = (roomId) => {
   }
 
   // Check if there's only one player in the room
-  if (room.players.length < 2) {
-    return socket.emit('invalidMove', 'Waiting for another player to join');
-  }
 
   if (socket.id === currentPlayer.socketId) {
     if (room.board[index] === null) {
@@ -328,17 +325,6 @@ const startTurnTimer = (roomId) => {
 
 console.log('Winner balance updated successfully');
 
-          // Emit 'gameOver' event with winner and loser info
-          // iooo.to(roomId).emit('gameOver', { 
-          //   winnerSymbol, 
-          //   result: gameResult, 
-          //   totalBet, 
-          //   winnerUserId, 
-          //   winnerPlayer, 
-          //   loserUserId, 
-          //   loserPlayer 
-          // });
-             // Emit different events for winner and loser
   io.to(winnerPlayer.socketId).emit('winnerScreen', { 
     result: gameResult, 
     totalBet, 
