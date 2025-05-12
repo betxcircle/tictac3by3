@@ -440,32 +440,28 @@ socket.on("disconnect", async () => {
 
                 io.to(roomId).emit("playerLeft", { 
                     message: `${disconnectedPlayer.playerName} left the game`, 
-                    roomId 
+                    roomId,
+                    players: room.players
                 });
 
-                // **Check if the game already has a winner before awarding the remaining player**
                 const winnerSymbol = checkWin(room.board);
                 if (winnerSymbol) {
                     console.log("🏆 Game already has a winner, no need to award the remaining player.");
                     return;
                 }
 
-                // If one player remains and there's NO existing winner, award them as default winner
                 if (room.players.length === 1) {
                     const winnerPlayer = room.players[0];
-                    console.log(`🏆 ${winnerPlayer.playerName} is the default winner because the opponent disconnected.`);
+                    console.log(`🏆 ${winnerPlayer.playerName} is the default winner because others disconnected.`);
 
                     try {
-                        // Fetch the winner from the database
                         const winnerUser = await OdinCircledbModel.findById(winnerPlayer.userId);
                         if (winnerUser) {
-                            // Award totalBet to the remaining player
                             winnerUser.wallet.cashoutbalance += room.totalBet;
                             await winnerUser.save();
 
-                            // Emit winner event
                             io.to(winnerPlayer.socketId).emit("winnerScreen", {
-                                result: `You win! Opponent disconnected.`,
+                                result: `You win! All other players disconnected.`,
                                 totalBet: room.totalBet,
                                 winnerUserId: winnerPlayer.userId,
                                 winnerPlayer
@@ -479,18 +475,25 @@ socket.on("disconnect", async () => {
                         console.error("❌ Error updating winner balance on opponent disconnect:", error);
                     }
 
-                    // Remove the room after awarding the winner
+                    // Delete room after awarding
                     delete activeRooms[roomId];
+                } else if (room.players.length >= 2) {
+                    // Let the game continue with the remaining players
+                    console.log("ℹ️ A player left, game continues with remaining players.");
+                    io.to(roomId).emit("playerListUpdate", {
+                        players: room.players,
+                        message: `${disconnectedPlayer.playerName} has left the game. Game continues.`
+                    });
                 }
 
-                // If no players remain, delete the room
                 if (room.players.length === 0) {
                     delete activeRooms[roomId];
                 }
             }
         }
     }
-})
+});
+
 });
 
 
