@@ -202,23 +202,35 @@ const startTurnTimer = (roomId) => {
     clearTimeout(room.turnTimeout);
   }
 
+  // If less than 2 players, no need to switch turn
+  if (room.players.length < 2) {
+    console.warn(`⚠️ Not enough players to continue turn switching in room ${roomId}`);
+    return;
+  }
+
   room.turnTimeout = setTimeout(() => {
     console.log(`⏰ Player took too long. Switching turn for room ${roomId}`);
 
-    // Switch turn
-    room.currentPlayer = (room.currentPlayer + 1) % 2;
-    const currentPlayer = room.players[room.currentPlayer];
+    // Rotate to next player dynamically
+    const currentPlayerIndex = room.players.findIndex(
+      (p) => p.socketId === room.players[room.currentPlayer]?.socketId
+    );
 
-    if (!currentPlayer) {
-      console.error('⚠️ No current player found');
+    let nextPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
+    const currentPlayer = room.players[nextPlayerIndex];
+
+    if (!currentPlayer || !currentPlayer.userId) {
+      console.error('⚠️ No valid current player found');
       return;
     }
+
+    room.currentPlayer = nextPlayerIndex;
 
     // Emit turn change
     io.to(roomId).emit('turnChange', currentPlayer.userId);
     console.log('🔄 Emitting turnChange:', currentPlayer.userId);
 
-    // Delay restart of the timer slightly
+    // Restart timer for next turn
     setTimeout(() => startTurnTimer(roomId), 100);
   }, 3000);
 };
