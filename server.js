@@ -194,46 +194,46 @@ async function startGame(room) {
 
 
   
-const startTurnTimer = (roomId) => {
+
+   const startTurnTimer = (roomId) => {
   const room = activeRooms[roomId];
   if (!room) return;
 
+  // Clear previous timeout
   if (room.turnTimeout) {
     clearTimeout(room.turnTimeout);
   }
 
-  // If less than 2 players, no need to switch turn
-  if (room.players.length < 2) {
-    console.warn(`⚠️ Not enough players to continue turn switching in room ${roomId}`);
-    return;
-  }
-
+  // Start a new turn timer
   room.turnTimeout = setTimeout(() => {
     console.log(`⏰ Player took too long. Switching turn for room ${roomId}`);
 
-    // Rotate to next player dynamically
-    const currentPlayerIndex = room.players.findIndex(
-      (p) => p.socketId === room.players[room.currentPlayer]?.socketId
-    );
-
-    let nextPlayerIndex = (currentPlayerIndex + 1) % room.players.length;
-    const currentPlayer = room.players[nextPlayerIndex];
-
-    if (!currentPlayer || !currentPlayer.userId) {
-      console.error('⚠️ No valid current player found');
+    // Defensive: Ensure room still has players
+    if (!room.players || room.players.length === 0) {
+      console.warn(`⚠️ No players in room ${roomId}, skipping turn.`);
       return;
     }
 
-    room.currentPlayer = nextPlayerIndex;
+    // Defensive: Fix out-of-bounds index
+    room.currentPlayer = room.currentPlayer % room.players.length;
 
-    // Emit turn change
-    io.to(roomId).emit('turnChange', currentPlayer.userId);
-    console.log('🔄 Emitting turnChange:', currentPlayer.userId);
+    // Switch turn
+    room.currentPlayer = (room.currentPlayer + 1) % room.players.length;
+    const currentPlayer = room.players[room.currentPlayer];
 
-    // Restart timer for next turn
+    if (!currentPlayer || !currentPlayer.userId) {
+      console.error("Error: currentPlayer is missing userId");
+      return;
+    }
+
+    console.log("🔄 Emitting turnChange:", currentPlayer.userId);
+    io.to(roomId).emit("turnChange", currentPlayer.userId);
+
+    // Restart the timer safely
     setTimeout(() => startTurnTimer(roomId), 100);
   }, 3000);
 };
+
 
 
    
@@ -256,7 +256,8 @@ const startTurnTimer = (roomId) => {
     return socket.emit('invalidMove', 'Room not found');
   }
 
-  const currentPlayerIndex = room.currentPlayer % 2;
+
+ const currentPlayerIndex = room.currentPlayer % room.players.length;
   const currentPlayer = room.players[currentPlayerIndex];
 
      // Check if currentPlayer exists and has userId
@@ -283,7 +284,7 @@ const startTurnTimer = (roomId) => {
 
    // Change turn
 // Change turn
-    room.currentPlayer = (room.currentPlayer + 1) % 2;
+    room.currentPlayer = (room.currentPlayer + 1) % room.players.length;
 
     // ⚠️ Fetch the *new* current player based on updated index
     const nextPlayer = room.players[room.currentPlayer];
@@ -410,7 +411,7 @@ console.log('Winner balance updated successfully');
 
         // Reset the game state for a new game
         room.board = Array(16).fill(null);
-        room.startingPlayer = (room.startingPlayer + 1) % 2;
+        room.startingPlayer = (room.startingPlayer + 1) % room.players.length;
         room.currentPlayer = room.startingPlayer;
 
         io.to(roomId).emit('newGame', 
@@ -425,71 +426,81 @@ console.log('Winner balance updated successfully');
 });
   
 socket.on("disconnect", async () => {
-    console.log(`❌ User disconnected: ${socket.id}`);
+  console.log(`❌ User disconnected: ${socket.id}`);
 
-    for (const roomId in activeRooms) {
-        const room = activeRooms[roomId];
+  for (const roomId in activeRooms) {
+    const room = activeRooms[roomId];
+    if (!room) continue;
 
-        if (room) {
-            const playerIndex = room.players.findIndex((player) => player.socketId === socket.id);
+    const playerIndex = room.players.findIndex(p => p.socketId === socket.id);
+    if (playerIndex === -1) continue;
 
-            if (playerIndex !== -1) {
-                const [disconnectedPlayer] = room.players.splice(playerIndex, 1);
+    const [disconnectedPlayer] = room.players.splice(playerIndex, 1);
 
-                io.to(roomId).emit("playerLeft", { 
-                    message: `${disconnectedPlayer.playerName} left the game`, 
-                    roomId,
-                    players: room.players
-                });
+    io.to(roomId).emit("playerLeft", { 
+      message: `${disconnectedPlayer?.name || "A player"} left the game. Game continues.`, 
+      players: room.players, 
+      roomId 
+    });
 
-                const winnerSymbol = checkWin(room.board);
-                if (winnerSymbol) {
-                    console.log("🏆 Game already has a winner, no need to award the remaining player.");
-                    return;
-                }
-
-                if (room.players.length === 1) {
-                    const winnerPlayer = room.players[0];
-                    console.log(`🏆 ${winnerPlayer.playerName} is the default winner because others disconnected.`);
-
-                    try {
-                        const winnerUser = await OdinCircledbModel.findById(winnerPlayer.userId);
-                        if (winnerUser) {
-                            winnerUser.wallet.cashoutbalance += room.totalBet;
-                            await winnerUser.save();
-
-                            io.to(winnerPlayer.socketId).emit("winnerScreen", {
-                                result: `You win! All other players disconnected.`,
-                                totalBet: room.totalBet,
-                                winnerUserId: winnerPlayer.userId,
-                                winnerPlayer
-                            });
-
-                            console.log(`💰 ${winnerPlayer.playerName} received ${room.totalBet} coins as the default winner.`);
-                        } else {
-                            console.error("❌ Winner user not found in the database.");
-                        }
-                    } catch (error) {
-                        console.error("❌ Error updating winner balance on opponent disconnect:", error);
-                    }
-
-                    // Delete room after awarding
-                    delete activeRooms[roomId];
-                } else if (room.players.length >= 2) {
-                    // Let the game continue with the remaining players
-                    console.log("ℹ️ A player left, game continues with remaining players.");
-                    io.to(roomId).emit("playerListUpdate", {
-                        players: room.players,
-                        message: `${disconnectedPlayer.playerName} has left the game. Game continues.`
-                    });
-                }
-
-                if (room.players.length === 0) {
-                    delete activeRooms[roomId];
-                }
-            }
-        }
+    // Check if there's already a winner
+    const winnerSymbol = checkWin(room.board);
+    if (winnerSymbol) {
+      console.log("🏆 Game already has a winner, no need to award the remaining player.");
+      return;
     }
+
+    // If only 1 player remains, award default win
+    if (room.players.length === 1) {
+      const winnerPlayer = room.players[0];
+      console.log(`🏆 ${winnerPlayer.playerName} wins by default (opponent left).`);
+
+      try {
+        const winnerUser = await OdinCircledbModel.findById(winnerPlayer.userId);
+        if (winnerUser) {
+          winnerUser.wallet.cashoutbalance += room.totalBet;
+          await winnerUser.save();
+
+          io.to(winnerPlayer.socketId).emit("winnerScreen", {
+            result: `You win! Opponent disconnected.`,
+            totalBet: room.totalBet,
+            winnerUserId: winnerPlayer.userId,
+            winnerPlayer
+          });
+
+          console.log(`💰 ${winnerPlayer.playerName} received ${room.totalBet} coins as default winner.`);
+        } else {
+          console.error("❌ Winner user not found in DB.");
+        }
+      } catch (err) {
+        console.error("❌ Error updating winner balance:", err);
+      }
+
+      delete activeRooms[roomId];
+      return;
+    }
+
+    // If more than 1 player remains, continue the game
+
+    // Fix currentPlayer index
+    if (room.currentPlayer >= room.players.length) {
+      room.currentPlayer = 0;
+    }
+
+    const currentPlayer = room.players[room.currentPlayer];
+    if (currentPlayer && currentPlayer.userId) {
+      io.to(roomId).emit("turnChange", currentPlayer.userId);
+      console.log(`🔄 Turn passed to ${currentPlayer.playerName || currentPlayer.userId}`);
+      startTurnTimer(roomId);
+    } else {
+      console.error("⚠️ currentPlayer is missing userId after disconnect.");
+    }
+
+    // If no players remain, delete the room
+    if (room.players.length === 0) {
+      delete activeRooms[roomId];
+    }
+  }
 });
 
 });
