@@ -64,7 +64,7 @@ socket.on("joinRoom", async ({ playerName, userId, roomId, amount, expoPushToken
     }
 
     // ❌ Room full
-    if (room.players.length >= 2) {
+    if (room.players.length >= 3) {
       console.log(`🚫 Room "${roomId}" is full.`);
       return socket.emit("roomFull", "Room is already full.");
     }
@@ -82,8 +82,10 @@ socket.on("joinRoom", async ({ playerName, userId, roomId, amount, expoPushToken
     activeRooms[roomId] = room;
   }
 
+     const playerIndex = room.players.length;
+
   // 🎭 Assign symbol
-  const symbols = ["X", "O"];
+  const symbols = ["X", "O", "B"];
   const playerNumber = room.players.length + 1;
   const playerSymbol = symbols[playerNumber - 1];
 
@@ -97,12 +99,19 @@ socket.on("joinRoom", async ({ playerName, userId, roomId, amount, expoPushToken
     amount,
     playerNumber,
     symbol: playerSymbol,
-    expoPushToken
+    expoPushToken,
+    playerIndex, // Assign player index here
   });
 
   // 📡 Join socket room
   socket.join(roomId);
   console.log(`✅ ${playerName} joined Room "${roomId}" as Player ${playerNumber}`);
+
+    // Send the assigned player index back to the client
+socket.emit("playerAssigned", {
+  playerIndex, // should be 0, 1, or 2
+  symbol: ["X", "O", "B"][playerIndex],
+});
 
   // 🎉 Confirm room join
   socket.emit("roomJoined", { roomId: room.roomId, amount, players: room.players });
@@ -114,7 +123,7 @@ socket.on("joinRoom", async ({ playerName, userId, roomId, amount, expoPushToken
   console.log(`🔄 Updated Room "${roomId}" players list:`, room.players);
 
   // ✅ Start game if 2 players are in
-  if (room.players.length === 2) {
+  if (room.players.length === 3) {
     startGame(room);
           room.currentPlayer = room.players[0].userId; // Set current turn to first player
       console.log('Updated current turn after second player joins:', room.currentPlayer);
@@ -126,7 +135,7 @@ socket.on("joinRoom", async ({ playerName, userId, roomId, amount, expoPushToken
       amount: room.amount,
     });
 
-    //room.currentPlayer = room.startingPlayer;
+    room.currentPlayer = room.startingPlayer;
     io.to(room.roomId).emit("turnChange", room.currentPlayer);
   }
 });
@@ -151,38 +160,42 @@ async function startGame(room) {
 
     try {
         // Fetch both players from the database
-        const player1 = await OdinCircledbModel.findById(room.players[0].userId);
+       const player1 = await OdinCircledbModel.findById(room.players[0].userId);
         const player2 = await OdinCircledbModel.findById(room.players[1].userId);
-
-        if (!player1 || !player2) {
+        const player3 = await OdinCircledbModel.findById(room.players[2].userId);
+      
+        if (!player1 || !player2 || !player3) {
             console.log("❌ Error: One or both players not found in the database.");
             io.to(room.roomId).emit("invalidGameStart", "Players not found");
             return;
         }
 
         // Check if both players have enough balance
-        if (player1.wallet.balance < room.amount || player2.wallet.balance < room.amount) {
-            console.log("❌ Error: One or both players have insufficient balance.");
-            io.to(room.roomId).emit("invalidGameStart", "One or both players have insufficient balance");
+        if (player1.wallet.balance < room.amount || player2.wallet.balance < room.amount || player3.wallet.balance < room.amount) {
+            console.log("❌ Error: One, two or three or both players have insufficient balance.");
+            io.to(room.roomId).emit("invalidGameStart", "One or all players have insufficient balance");
             return;
         }
 
         // Deduct the balance from both players
         player1.wallet.balance -= room.amount;
         player2.wallet.balance -= room.amount;
+        player3.wallet.balance -= room.amount;
 
         // Save the updated balances
         await player1.save();
         await player2.save();
+        await player3.save();
 
         // Update total bet in the room
-        room.totalBet = room.amount * 2;
+        room.totalBet = room.amount * 3;
 
         console.log(`💰 Balance deducted from both players. Total Bet: ${room.totalBet}`);
 
         // Emit updated balances to players
         io.to(player1.socketId).emit("balanceUpdated", { newBalance: player1.wallet.balance });
         io.to(player2.socketId).emit("balanceUpdated", { newBalance: player2.wallet.balance });
+       io.to(player3.socketId).emit("balanceUpdated", { newBalance: player3.wallet.balance });
 
         // Emit game start event
        // io.to(room.roomId).emit("gameStart", { message: "Game is starting!", room });
