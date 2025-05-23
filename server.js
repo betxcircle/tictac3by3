@@ -244,7 +244,7 @@ async function startGame(room) {
 
     // Restart the timer safely
     setTimeout(() => startTurnTimer(roomId), 100);
-  }, 3000);
+  }, 5000);
 };
 
 
@@ -555,13 +555,13 @@ const checkWin = (board) => {
   [7, 10, 13],
 ];
 
-
-  for (let line of winningLines) {
-    const [a, b, c, d] = line;
-    if (board[a] && board[a] === board[b] && board[a] === board[c] && board[a] === board[d]) {
-      return board[a];
+ for (let line of winningLines) {
+    const [a, b, c] = line;
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return { winnerSymbol: board[a], winningLine: line };
     }
   }
+
 
   return null;
 };
